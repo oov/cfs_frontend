@@ -1,0 +1,9 @@
+Win32_*/
+x64_*/
+.vs/
+packages/
+*.sdf
+*.suo
+*.vcxproj.user
+version.h
+*.zip
