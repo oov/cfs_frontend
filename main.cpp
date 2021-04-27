@@ -553,9 +553,9 @@ private:
 			return error_invalid_args(fn);
 		}
 
-		std::wstring default_filename;
 		std::wstring filename;
 		{
+			std::wstring default_filename;
 			build_default_filename(character.c_str(), text.c_str(), default_filename);
 			HRESULT hr = show_save_dialog(window_, default_filename.c_str(), filename);
 			if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
