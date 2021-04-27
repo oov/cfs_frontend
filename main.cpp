@@ -413,8 +413,6 @@ const call = (method, params) => {
     window.chrome.webview.postMessage({id, method, params});
   });
 };
-
-window.cbs = cbs;
 document.addEventListener('click', e => {
   if (!e || !e.target) {
     return;
