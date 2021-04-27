@@ -431,6 +431,9 @@ document.addEventListener('click', e => {
   const text = document.querySelector('.maineditor .focusin .textarea textarea').value;
   const character = document.querySelector('.maineditor .focusin .speaker .v-select__selection').textContent;
   CoeFontStudioFrontend.download({userAgent, url, text, character}).catch(r => {
+    if (r.code == "abort") {
+      return;
+    }
     alert(r.message);
   });
 }, true);
