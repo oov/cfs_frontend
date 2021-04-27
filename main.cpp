@@ -532,7 +532,9 @@ private:
 
 	void api_version(const picojson::object params, resolver fn) const {
 		picojson::object result;
-		result[u8"version"].set<std::string>(version);
+		std::string v;
+		to_u8(version, -1, v);
+		result[u8"version"].set<std::string>(v);
 		return fn(true, result);
 	}
 	void api_download(const picojson::object params, resolver fn) const {
@@ -713,9 +715,12 @@ static HWND create_window(int show) {
 		return 0;
 	}
 
+	std::wstring t(szTitle);
+	t += L' ';
+	t += version;
 	HWND hWnd = CreateWindow(
 		szWindowClass,
-		szTitle,
+		t.c_str(),
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		1200, 900,
