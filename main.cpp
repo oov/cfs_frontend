@@ -683,7 +683,7 @@ static HRESULT webview2_runtime_check(LPCWSTR title, LPCWSTR main_instruction, L
 }
 
 static const TCHAR szWindowClass[] = _T("cfs_frontend");
-static const TCHAR szTitle[] = _T("非公式 CoeFont Studio フロントエンド");
+static const TCHAR szTitle[] = _T("非公式 CoeFont STUDIO フロントエンド");
 
 static HINSTANCE hInst;
 static API api;
