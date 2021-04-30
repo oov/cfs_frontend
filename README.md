@@ -34,6 +34,16 @@ cfs_frontend.exe を起動すると必ず作られるフォルダーで、ブラ
 削除しても特に問題はありませんが、ログイン状態などが解除されるでしょう。  
 変なフォルダーではありません。
 
+## 更新履歴
+
+### v0.2
+
+- 細かい修正など
+
+### v0.1
+
+- 初版
+
 ## Credits
 
 cfs_frontend is made possible by the following open source softwares.
