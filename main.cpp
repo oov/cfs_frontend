@@ -464,16 +464,14 @@ private:
 	HRESULT handle(ComPtr<ICoreWebView2> webview, ICoreWebView2WebMessageReceivedEventArgs* args) {
 		picojson::value v;
 		{
-			PWSTR json = nullptr;
+			std::string u8;
 			{
-				const HRESULT hr = args->get_WebMessageAsJson(&json);
+				PWSTR json = nullptr;
+				HRESULT hr = args->get_WebMessageAsJson(&json);
 				if (FAILED(hr)) {
 					return E_FAIL;
 				}
-			}
-			std::string u8;
-			{
-				const HRESULT hr = to_u8(json, -1, u8);
+				hr = to_u8(json, -1, u8);
 				CoTaskMemFree(json);
 				if (FAILED(hr)) {
 					return hr;
