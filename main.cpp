@@ -116,7 +116,157 @@ static HRESULT to_sjis(LPCWSTR src, const int srclen, std::string& dest) {
 	return S_OK;
 }
 
-static HRESULT CALLBACK show_save_dialog(HWND hWnd, LPCWSTR filename, std::wstring& dest) {
+static HRESULT write(HANDLE file, const void* p, size_t bytes) {
+	uint8_t* s = (uint8_t*)p;
+	size_t pos = 0;
+	while (pos < bytes)
+	{
+		DWORD written = 0;
+		if (!WriteFile(file, &s[pos], bytes - pos, &written, nullptr)) {
+			return HRESULT_FROM_WIN32(GetLastError());
+		}
+		pos += written;
+	}
+	return S_OK;
+}
+
+struct setting {
+	int text_encoding;
+};
+
+static HRESULT load_json(LPCWSTR filepath, picojson::value& dest) {
+	HANDLE file = CreateFileW(filepath, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (file == INVALID_HANDLE_VALUE) {
+		HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+		dest = picojson::value();
+		return hr;
+	}
+	std::string s;
+	{
+		char buf[4096] = {};
+		DWORD read = 0;
+		do {
+			if (!ReadFile(file, buf, 4096, &read, NULL)) {
+				HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+				dest = picojson::value();
+				return hr;
+			}
+			if (read > 0) {
+				s.append(buf, read);
+			}
+		} while (read > 0);
+	}
+	CloseHandle(file);
+
+	const std::string err = picojson::parse(dest, s);
+	if (!err.empty()) {
+		return E_FAIL;
+	}
+	return S_OK;
+}
+
+static HRESULT save_json(LPCWSTR filepath, const picojson::value src) {
+	HRESULT hr = 0;
+	HANDLE file = CreateFileW(filepath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (file == INVALID_HANDLE_VALUE) {
+		hr = HRESULT_FROM_WIN32(GetLastError());
+		return hr;
+	}
+	std::string s = src.serialize();
+	hr = write(file, &s[0], s.size());
+	if (FAILED(hr)) {
+		CloseHandle(file);
+		return hr;
+	}
+	CloseHandle(file);
+	return S_OK;
+}
+
+static HRESULT load_setting(LPCWSTR filepath, setting& dest) {
+	dest.text_encoding = ENCODING_UTF8;
+
+	picojson::value v;
+	HRESULT hr = load_json(filepath, v);
+	if (FAILED(hr)) {
+		return hr;
+	}
+	if (!v.is<picojson::object>()) {
+		return E_FAIL;
+	}
+	const picojson::object& obj = v.get<picojson::object>();
+	{
+		const auto it = obj.find(u8"textEncoding");
+		if (it != obj.end()) {
+			const auto e = it->second.to_str();
+			if (e == "utf8") {
+				dest.text_encoding = ENCODING_UTF8;
+			}
+			else if (e == "utf8bom") {
+				dest.text_encoding = ENCODING_UTF8BOM;
+			}
+			else if (e == "utf16le") {
+				dest.text_encoding = ENCODING_UTF16LE;
+			}
+			else if (e == "utf16lebom") {
+				dest.text_encoding = ENCODING_UTF16LEBOM;
+			}
+			else if (e == "utf16be") {
+				dest.text_encoding = ENCODING_UTF16BE;
+			}
+			else if (e == "utf16bebom") {
+				dest.text_encoding = ENCODING_UTF16BEBOM;
+			}
+			else if (e == "sjis") {
+				dest.text_encoding = ENCODING_SHIFTJIS;
+			}
+		}
+	}
+	return S_OK;
+}
+static HRESULT save_setting(LPCWSTR filepath, const setting& dest) {
+	picojson::object obj;
+	std::string s;
+	switch (dest.text_encoding) {
+	case ENCODING_UTF8:
+		s = "utf8";
+		break;
+	case ENCODING_UTF8BOM:
+		s = "utf8bom";
+		break;
+	case ENCODING_UTF16LE:
+		s = "utf16le";
+		break;
+	case ENCODING_UTF16LEBOM:
+		s = "utf16lebom";
+		break;
+	case ENCODING_UTF16BE:
+		s = "utf16be";
+		break;
+	case ENCODING_UTF16BEBOM:
+		s = "utf16bebom";
+		break;
+	case ENCODING_SHIFTJIS:
+		s = "sjis";
+		break;
+	default:
+		s = "utf8";
+		break;
+	}
+	obj[u8"textEncoding"].set<std::string>(s);
+	return save_json(filepath, picojson::value(obj));
+}
+
+static HRESULT CALLBACK show_save_dialog(HWND hWnd, LPCWSTR default_filename, int& text_encoding, std::wstring& dest) {
+	std::wstring setting_path;
+	setting_path.resize(MAX_PATH);
+	if (GetModuleFileNameW(nullptr, &setting_path[0], MAX_PATH) == 0) {
+		return HRESULT_FROM_WIN32(GetLastError());
+	}
+	setting_path.resize(setting_path.rfind(L'.') + 1);
+	setting_path += L"json";
+	setting s;
+	load_setting(setting_path.c_str(), s);
+
 	ComPtr<IFileSaveDialog> d;
 	HRESULT hr = CoCreateInstance(CLSID_FileSaveDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&d));
 	if (FAILED(hr))
@@ -142,12 +292,75 @@ static HRESULT CALLBACK show_save_dialog(HWND hWnd, LPCWSTR filename, std::wstri
 	{
 		return hr;
 	}
-	hr = d->SetFileName(filename);
+	hr = d->SetFileName(default_filename);
 	if (FAILED(hr))
 	{
 		return hr;
 	}
+	ComPtr<IFileDialogCustomize> dc;
+	hr = d->QueryInterface(IID_PPV_ARGS(&dc));
+	if (FAILED(hr)) {
+		return hr;
+	}
+	enum {
+		ENCODING_GROUP = 2000,
+		ENCODING_COMBOBOX = 2001,
+	};
+	hr = dc->StartVisualGroup(ENCODING_GROUP, L"テキストの文字コード");
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->AddComboBox(ENCODING_COMBOBOX);
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->AddControlItem(ENCODING_COMBOBOX, ENCODING_UTF8, L"UTF-8");
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->AddControlItem(ENCODING_COMBOBOX, ENCODING_UTF8BOM, L"UTF-8(BOM)");
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->AddControlItem(ENCODING_COMBOBOX, ENCODING_UTF16LE, L"UTF-16LE");
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->AddControlItem(ENCODING_COMBOBOX, ENCODING_UTF16LEBOM, L"UTF-16LE(BOM)");
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->AddControlItem(ENCODING_COMBOBOX, ENCODING_UTF16BE, L"UTF-16BE");
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->AddControlItem(ENCODING_COMBOBOX, ENCODING_UTF16BEBOM, L"UTF-16BE(BOM)");
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->AddControlItem(ENCODING_COMBOBOX, ENCODING_SHIFTJIS, L"Shift_JIS");
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->SetSelectedControlItem(ENCODING_COMBOBOX, s.text_encoding);
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->SetControlState(ENCODING_COMBOBOX, CDCS_VISIBLE | CDCS_ENABLED);
+	if (FAILED(hr)) {
+		return hr;
+	}
+	hr = dc->EndVisualGroup();
+	if (FAILED(hr)) {
+		return hr;
+	}
 	hr = d->Show(hWnd);
+	if (FAILED(hr))
+	{
+		return hr;
+	}
+	DWORD selected;
+	hr = dc->GetSelectedControlItem(ENCODING_COMBOBOX, &selected);
 	if (FAILED(hr))
 	{
 		return hr;
@@ -165,7 +378,11 @@ static HRESULT CALLBACK show_save_dialog(HWND hWnd, LPCWSTR filename, std::wstri
 		return hr;
 	}
 	dest = filepath;
+	text_encoding = selected;
+	s.text_encoding = selected;
 	CoTaskMemFree(filepath);
+
+	save_setting(setting_path.c_str(), s);
 	return S_OK;
 }
 
@@ -211,20 +428,6 @@ static HRESULT download(LPCWSTR user_agent, LPCWSTR url, LPCWSTR filepath) {
 	InternetCloseHandle(h);
 	InternetCloseHandle(inet);
 	CloseHandle(file);
-	return S_OK;
-}
-
-static HRESULT write(HANDLE file, const void* p, size_t bytes) {
-	uint8_t* s = (uint8_t*)p;
-	size_t pos = 0;
-	while (pos < bytes)
-	{
-		DWORD written = 0;
-		if (!WriteFile(file, &s[pos], bytes - pos, &written, nullptr)) {
-			return HRESULT_FROM_WIN32(GetLastError());
-		}
-		pos += written;
-	}
 	return S_OK;
 }
 
@@ -470,11 +673,10 @@ class API {
 	HWND window_;
 	EventRegistrationToken token_;
 	LONG waiting;
-	int text_encoding_;
 	CRITICAL_SECTION cs;
 	std::vector<task> tasks;
 public:
-	API() : window_(nullptr), text_encoding_(ENCODING_UTF8), cs({}) {
+	API() : window_(nullptr), cs({}) {
 		InitializeCriticalSection(&cs);
 	}
 	virtual ~API() {
@@ -483,10 +685,6 @@ public:
 
 	void set_window(HWND hWnd) {
 		window_ = hWnd;
-	}
-
-	void set_text_encoding(int text_encoding) {
-		text_encoding_ = text_encoding;
 	}
 
 	void pump() {
@@ -676,11 +874,12 @@ private:
 			return error_invalid_args(fn);
 		}
 
+		int text_encoding = ENCODING_UTF8;
 		std::wstring filename;
 		{
 			std::wstring default_filename;
 			build_default_filename(character.c_str(), text.c_str(), default_filename);
-			HRESULT hr = show_save_dialog(window_, default_filename.c_str(), filename);
+			HRESULT hr = show_save_dialog(window_, default_filename.c_str(), text_encoding, filename);
 			if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
 				return error_abort(fn);
 			}
@@ -688,7 +887,7 @@ private:
 				return error_internal(fn);
 			}
 		}
-		std::thread t1(api_download_worker, user_agent, url, text, text_encoding_, filename, fn);
+		std::thread t1(api_download_worker, user_agent, url, text, text_encoding, filename, fn);
 		t1.detach();
 	}
 	static void api_download_worker(
