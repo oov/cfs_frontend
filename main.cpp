@@ -24,6 +24,16 @@
 
 using namespace Microsoft::WRL;
 
+enum {
+	ENCODING_UTF8 = 0,
+	ENCODING_UTF8BOM = 1,
+	ENCODING_UTF16LE = 2,
+	ENCODING_UTF16LEBOM = 3,
+	ENCODING_UTF16BE = 4,
+	ENCODING_UTF16BEBOM = 5,
+	ENCODING_SHIFTJIS = 6,
+};
+
 static bool report(HRESULT hr, LPCWSTR message) {
 	if (SUCCEEDED(hr)) {
 		return false;
@@ -79,6 +89,25 @@ static HRESULT to_u8(LPCWSTR src, const int srclen, std::string& dest) {
 	}
 	dest.resize(destlen);
 	if (WideCharToMultiByte(CP_UTF8, 0, src, srclen, &dest[0], destlen, nullptr, nullptr) == 0) {
+		return HRESULT_FROM_WIN32(GetLastError());
+	}
+	if (srclen == -1) {
+		dest.resize(destlen - 1);
+	}
+	return S_OK;
+}
+
+static HRESULT to_sjis(LPCWSTR src, const int srclen, std::string& dest) {
+	if (srclen == 0) {
+		dest.resize(0);
+		return S_OK;
+	}
+	const int destlen = WideCharToMultiByte(932, 0, src, srclen, nullptr, 0, nullptr, nullptr);
+	if (destlen == 0) {
+		return HRESULT_FROM_WIN32(GetLastError());
+	}
+	dest.resize(destlen);
+	if (WideCharToMultiByte(932, 0, src, srclen, &dest[0], destlen, nullptr, nullptr) == 0) {
 		return HRESULT_FROM_WIN32(GetLastError());
 	}
 	if (srclen == -1) {
@@ -185,30 +214,118 @@ static HRESULT download(LPCWSTR user_agent, LPCWSTR url, LPCWSTR filepath) {
 	return S_OK;
 }
 
-static HRESULT write_text(LPCWSTR filepath, LPCWSTR text) {
-	std::string u8;
-	HRESULT hr = to_u8(text, -1, u8);
-	if (FAILED(hr)) {
-		return hr;
-	}
-	const HANDLE file = CreateFileW(filepath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (file == INVALID_HANDLE_VALUE) {
-		HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
-		return hr;
-	}
-	std::string::size_type pos = 0;
-	while (pos < u8.size())
+static HRESULT write(HANDLE file, const void* p, size_t bytes) {
+	uint8_t* s = (uint8_t*)p;
+	size_t pos = 0;
+	while (pos < bytes)
 	{
 		DWORD written = 0;
-		if (!WriteFile(file, &u8[pos], u8.size() - pos, &written, nullptr)) {
-			HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
-			CloseHandle(file);
-			return hr;
+		if (!WriteFile(file, &s[pos], bytes - pos, &written, nullptr)) {
+			return HRESULT_FROM_WIN32(GetLastError());
 		}
 		pos += written;
 	}
+	return S_OK;
+}
+
+static bool is_big_endian() {
+	union {
+		uint32_t i;
+		uint8_t c[4];
+	} u = { 0x01020304 };
+	return u.c[0] == 1;
+}
+
+static HRESULT write_text(LPCWSTR filepath, LPCWSTR text, int text_encoding) {
+	const uint8_t bom_utf8[3] = { 0xef, 0xbb, 0xbf };
+	const uint8_t bom_utf16le[2] = { 0xff, 0xfe };
+	const uint8_t bom_utf16be[2] = { 0xfe, 0xff };
+
+	HRESULT hr = 0;
+	HANDLE file = CreateFileW(filepath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (file == INVALID_HANDLE_VALUE) {
+		hr = HRESULT_FROM_WIN32(GetLastError());
+		return hr;
+	}
+
+	std::string s;
+	std::wstring ws;
+
+	const uint8_t* bom = nullptr;
+	size_t bomln = 0;
+	uint8_t* p = nullptr;
+	size_t ln = 0;
+	switch (text_encoding) {
+	case ENCODING_UTF8:
+	case ENCODING_UTF8BOM:
+		if (text_encoding == ENCODING_UTF8BOM) {
+			bom = bom_utf8;
+			bomln = 3;
+		}
+		hr = to_u8(text, -1, s);
+		if (FAILED(hr)) {
+			goto failed;
+		}
+		p = (uint8_t*)(&s[0]);
+		ln = s.size();
+		break;
+	case ENCODING_UTF16LE:
+	case ENCODING_UTF16LEBOM:
+	case ENCODING_UTF16BE:
+	case ENCODING_UTF16BEBOM:
+		if (text_encoding == ENCODING_UTF16LEBOM) {
+			bom = bom_utf16le;
+			bomln = 2;
+		}
+		else if (text_encoding == ENCODING_UTF16BEBOM) {
+			bom = bom_utf16be;
+			bomln = 2;
+		}
+		ws = text;
+		{
+			const bool isbe = is_big_endian();
+			if (
+				(!isbe && (text_encoding == ENCODING_UTF16BE || text_encoding == ENCODING_UTF16BEBOM)) ||
+				(isbe && (text_encoding == ENCODING_UTF16LE || text_encoding == ENCODING_UTF16LEBOM))
+				) {
+				for (std::wstring::size_type pos = 0; pos < ws.size(); ++pos) {
+					ws[pos] = ((ws[pos] & 0x00ff) << 8) | ((ws[pos] & 0xff00) >> 8);
+				}
+			}
+		}
+		p = (uint8_t*)(&ws[0]);
+		ln = ws.size() * 2;
+		break;
+	case ENCODING_SHIFTJIS:
+		hr = to_sjis(text, -1, s);
+		if (FAILED(hr)) {
+			goto failed;
+		}
+		p = (uint8_t*)(&s[0]);
+		ln = s.size();
+		break;
+	default:
+		hr = E_INVALIDARG;
+		goto failed;
+	}
+	if (bomln > 0) {
+		hr = write(file, bom, bomln);
+		if (FAILED(hr)) {
+			goto failed;
+		}
+	}
+	if (ln > 0) {
+		hr = write(file, p, ln);
+		if (FAILED(hr)) {
+			goto failed;
+		}
+	}
 	CloseHandle(file);
 	return S_OK;
+failed:
+	CloseHandle(file);
+	DeleteFile(filepath);
+	return hr;
 }
 
 static void sanitize(LPCWSTR src, std::wstring& dest) {
@@ -353,10 +470,11 @@ class API {
 	HWND window_;
 	EventRegistrationToken token_;
 	LONG waiting;
+	int text_encoding_;
 	CRITICAL_SECTION cs;
 	std::vector<task> tasks;
 public:
-	API() : window_(nullptr), cs({}) {
+	API() : window_(nullptr), text_encoding_(ENCODING_UTF8), cs({}) {
 		InitializeCriticalSection(&cs);
 	}
 	virtual ~API() {
@@ -365,6 +483,10 @@ public:
 
 	void set_window(HWND hWnd) {
 		window_ = hWnd;
+	}
+
+	void set_text_encoding(int text_encoding) {
+		text_encoding_ = text_encoding;
 	}
 
 	void pump() {
@@ -566,13 +688,14 @@ private:
 				return error_internal(fn);
 			}
 		}
-		std::thread t1(api_download_worker, user_agent, url, text, filename, fn);
+		std::thread t1(api_download_worker, user_agent, url, text, text_encoding_, filename, fn);
 		t1.detach();
 	}
 	static void api_download_worker(
 		const std::wstring user_agent,
 		const std::wstring url,
 		const std::wstring text,
+		const int text_encoding,
 		const std::wstring filename,
 		resolver fn
 	) {
@@ -584,7 +707,7 @@ private:
 		std::wstring textname = filename;
 		textname.resize(textname.rfind(L'.') + 1);
 		textname += L"txt";
-		hr = write_text(textname.c_str(), text.c_str());
+		hr = write_text(textname.c_str(), text.c_str(), text_encoding);
 		if (FAILED(hr)) {
 			return error_internal(fn);
 		}
