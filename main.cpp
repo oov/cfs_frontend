@@ -183,7 +183,7 @@ static HRESULT save_json(LPCWSTR filepath, const picojson::value src) {
 }
 
 static HRESULT load_setting(LPCWSTR filepath, setting& dest) {
-	dest.text_encoding = ENCODING_UTF8;
+	dest.text_encoding = ENCODING_UTF8BOM;
 
 	picojson::value v;
 	HRESULT hr = load_json(filepath, v);
@@ -249,7 +249,7 @@ static HRESULT save_setting(LPCWSTR filepath, const setting& dest) {
 		s = "sjis";
 		break;
 	default:
-		s = "utf8";
+		s = "utf8bom";
 		break;
 	}
 	obj[u8"textEncoding"].set<std::string>(s);
@@ -874,7 +874,7 @@ private:
 			return error_invalid_args(fn);
 		}
 
-		int text_encoding = ENCODING_UTF8;
+		int text_encoding = ENCODING_UTF8BOM;
 		std::wstring filename;
 		{
 			std::wstring default_filename;
