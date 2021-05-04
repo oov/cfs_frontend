@@ -1022,11 +1022,11 @@ static HWND create_window(int show) {
 	wcex.style = CS_HREDRAW | CS_VREDRAW;
 	wcex.lpfnWndProc = window_proc;
 	wcex.hInstance = hInst;
-	wcex.hIcon = LoadIcon(hInst, IDI_APPLICATION);
+	wcex.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_MAINICON));
 	wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
 	wcex.lpszClassName = szWindowClass;
-	wcex.hIconSm = LoadIcon(wcex.hInstance, IDI_APPLICATION);
+	wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_MAINICON));
 	if (!RegisterClassEx(&wcex))
 	{
 		report(

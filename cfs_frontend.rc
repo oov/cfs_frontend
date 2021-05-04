@@ -47,8 +47,13 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 //
-// ASSETS
+// Icon
 //
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_MAINICON            ICON                    "icon.ico"
+
 #endif    // “ú–{Œê (“ú–{) resources
 /////////////////////////////////////////////////////////////////////////////
 
