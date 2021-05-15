@@ -737,11 +737,8 @@ document.addEventListener('click', e => {
   if (!e || !e.target) {
     return;
   }
-  const a = e.target.closest('a.download-button');
+  const a = e.target.closest('.yomi-card-dl-btn a.download-button');
   if (!a) {
-    return;
-  }
-  if (!a.matches('.yomi-card-dl-btn')) {
     return;
   }
   e.stopPropagation();
