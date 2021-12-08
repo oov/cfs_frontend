@@ -723,7 +723,7 @@ public:
     {
       return;
     }
-    AllowDarkModeForApp_ = (AllowDarkModeForAppFunc)GetProcAddress(uxtheme_, MAKEINTRESOURCEA(135));
+    AllowDarkModeForApp_ = (AllowDarkModeForAppFunc)(void*)GetProcAddress(uxtheme_, MAKEINTRESOURCEA(135));
     if (AllowDarkModeForApp_)
     {
       AllowDarkModeForApp_(TRUE); // System menu
@@ -776,7 +776,7 @@ private:
       return false;
     }
     typedef INT(WINAPI * RtlGetVersionFunc)(OSVERSIONINFOEXW *);
-    RtlGetVersionFunc RtlGetVersion_ = (RtlGetVersionFunc)GetProcAddress(h, "RtlGetVersion");
+    RtlGetVersionFunc RtlGetVersion_ = (RtlGetVersionFunc)(void*)GetProcAddress(h, "RtlGetVersion");
     if (!RtlGetVersion_)
     {
       FreeLibrary(h);
