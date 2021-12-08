@@ -12,6 +12,7 @@
 #include <shlobj.h>
 #include <dwmapi.h>
 #include <wininet.h>
+#include <wrl.h>
 
 #include "picojson.h"
 #include "resource.h"
@@ -22,22 +23,6 @@
 #define FCC_DEVTOOL
 #define FCC_ACCEPTALL
 #endif
-
-template <typename T>
-struct ComDeleter
-{
-  constexpr ComDeleter() noexcept = default;
-  template <
-      typename U,
-      typename std::enable_if<std::is_convertible<U *, T *>::value, std::nullptr_t>::type = nullptr>
-  ComDeleter(const ComDeleter<U> &) noexcept {}
-
-  void operator()(T *ptr) const
-  {
-    if (ptr)
-      ptr->Release();
-  }
-};
 
 enum
 {
@@ -327,14 +312,12 @@ static HRESULT CALLBACK show_save_dialog(HWND hWnd, LPCWSTR default_filename, in
   setting s;
   load_setting(setting_path.c_str(), s);
 
-  IFileSaveDialog *fsd = nullptr;
-  HRESULT hr = CoCreateInstance(CLSID_FileSaveDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&fsd));
+  Microsoft::WRL::ComPtr<IFileSaveDialog> d;
+  HRESULT hr = CoCreateInstance(CLSID_FileSaveDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&d));
   if (FAILED(hr))
   {
     return hr;
   }
-  fsd->AddRef();
-  std::unique_ptr<IFileSaveDialog, ComDeleter<IFileSaveDialog>> d(fsd);
   const COMDLG_FILTERSPEC filter[] = {{L"Wave ファイル(*.wav)", L"*.wav"}};
   hr = d->SetFileTypes(ARRAYSIZE(filter), filter);
   if (FAILED(hr))
@@ -356,14 +339,12 @@ static HRESULT CALLBACK show_save_dialog(HWND hWnd, LPCWSTR default_filename, in
   {
     return hr;
   }
-  IFileDialogCustomize *fdc = nullptr;
-  hr = d->QueryInterface(IID_PPV_ARGS(&fdc));
+  Microsoft::WRL::ComPtr<IFileDialogCustomize> dc;
+  hr = d->QueryInterface(IID_PPV_ARGS(&dc));
   if (FAILED(hr))
   {
     return hr;
   }
-  fsd->AddRef();
-  std::unique_ptr<IFileDialogCustomize, ComDeleter<IFileDialogCustomize>> dc(fdc);
   enum
   {
     ENCODING_GROUP = 2000,
@@ -440,14 +421,12 @@ static HRESULT CALLBACK show_save_dialog(HWND hWnd, LPCWSTR default_filename, in
   {
     return hr;
   }
-  IShellItem *si = nullptr;
-  hr = d->GetResult(&si);
+  Microsoft::WRL::ComPtr<IShellItem> r;
+  hr = d->GetResult(&r);
   if (FAILED(hr))
   {
     return hr;
   }
-  fsd->AddRef();
-  std::unique_ptr<IShellItem, ComDeleter<IShellItem>> r(si);
   PWSTR filepath = NULL;
   hr = r->GetDisplayName(SIGDN_FILESYSPATH, &filepath);
   if (FAILED(hr))
@@ -840,7 +819,7 @@ class Handler : public C
   ULONG count_;
 
 public:
-  Handler(fntype fn) : fn_(fn), count_(1)
+  Handler(fntype fn) : fn_(fn), count_(0)
   {
   }
   virtual ~Handler()
@@ -913,14 +892,14 @@ public:
     LeaveCriticalSection(&cs);
   }
 
-  HRESULT install(ICoreWebView2 *webview)
+  HRESULT install(Microsoft::WRL::ComPtr<ICoreWebView2> &webview)
   {
-    std::unique_ptr<ICoreWebView2WebMessageReceivedEventHandler, ComDeleter<ICoreWebView2WebMessageReceivedEventHandler>> insth(new Handler<ICoreWebView2WebMessageReceivedEventHandler, ICoreWebView2 *, ICoreWebView2WebMessageReceivedEventArgs *>(
+    Microsoft::WRL::ComPtr<ICoreWebView2WebMessageReceivedEventHandler> insth(new Handler<ICoreWebView2WebMessageReceivedEventHandler, ICoreWebView2 *, ICoreWebView2WebMessageReceivedEventArgs *>(
         [this](ICoreWebView2 *webview, ICoreWebView2WebMessageReceivedEventArgs *args) -> HRESULT
         {
           return handle(webview, args);
         }));
-    HRESULT hr = webview->add_WebMessageReceived(insth.get(), &token_);
+    HRESULT hr = webview->add_WebMessageReceived(insth.Get(), &token_);
     if (FAILED(hr))
     {
       return hr;
@@ -1270,8 +1249,8 @@ static API api;
 static DarkMode dark_mode;
 static LRESULT CALLBACK window_proc(HWND, UINT, WPARAM, LPARAM);
 
-static std::shared_ptr<ICoreWebView2Controller> webview_controller(nullptr, ComDeleter<ICoreWebView2Controller>());
-static std::shared_ptr<ICoreWebView2> webview(nullptr, ComDeleter<ICoreWebView2>());
+static Microsoft::WRL::ComPtr<ICoreWebView2Controller> webview_controller;
+static Microsoft::WRL::ComPtr<ICoreWebView2> webview;
 
 static HWND create_window(int show)
 {
@@ -1344,11 +1323,11 @@ int CALLBACK WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
     return 1;
   }
 
-  std::unique_ptr<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, ComDeleter<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>> envh(new Handler<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, HRESULT, ICoreWebView2Environment *>(
+  Microsoft::WRL::ComPtr<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler> envh(new Handler<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, HRESULT, ICoreWebView2Environment *>(
       [hWnd](HRESULT result, ICoreWebView2Environment *env) -> HRESULT
       {
         report(result, L"ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler failed");
-        std::unique_ptr<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler, ComDeleter<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>> conth(new Handler<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler, HRESULT, ICoreWebView2Controller *>(
+        Microsoft::WRL::ComPtr<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler> conth(new Handler<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler, HRESULT, ICoreWebView2Controller *>(
             [hWnd](HRESULT result, ICoreWebView2Controller *controller) -> HRESULT
             {
               report(result, L"ICoreWebView2CreateCoreWebView2ControllerCompletedHandler failed");
@@ -1356,16 +1335,11 @@ int CALLBACK WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
               {
                 return E_FAIL;
               }
-              controller->AddRef();
-              webview_controller = std::shared_ptr<ICoreWebView2Controller>(controller, ComDeleter<ICoreWebView2Controller>());
-              ICoreWebView2 *wv = nullptr;
-              if (report(webview_controller->get_CoreWebView2(&wv), L"ICoreWebView2Controller::get_CoreWebView2 failed"))
+              webview_controller = controller;
+              if (report(webview_controller->get_CoreWebView2(&webview), L"ICoreWebView2Controller::get_CoreWebView2 failed"))
               {
                 return E_FAIL;
               }
-              wv->AddRef();
-              webview = std::shared_ptr<ICoreWebView2>(wv, ComDeleter<ICoreWebView2>());
-
               if (report(
                       webview->CallDevToolsProtocolMethod(
                           L"Emulation.setDefaultBackgroundColorOverride",
@@ -1377,14 +1351,13 @@ int CALLBACK WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
               }
 
               {
-                ICoreWebView2Settings *cwv2s = nullptr;
+                Microsoft::WRL::ComPtr<ICoreWebView2Settings> Settings;
                 if (report(
-                        webview->get_Settings(&cwv2s),
+                        webview->get_Settings(&Settings),
                         L"ICoreWebView2::get_Settings failed"))
                 {
                   return E_FAIL;
                 }
-                std::unique_ptr<ICoreWebView2Settings, ComDeleter<ICoreWebView2Settings>> Settings(cwv2s);
                 report(
                     Settings->put_IsScriptEnabled(TRUE),
                     L"ICoreWebView2Settings::put_IsScriptEnabled failed");
@@ -1433,8 +1406,7 @@ int CALLBACK WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
               {
                 return E_FAIL;
               }
-
-              std::unique_ptr<ICoreWebView2NewWindowRequestedEventHandler, ComDeleter<ICoreWebView2NewWindowRequestedEventHandler>> reqh(new Handler<ICoreWebView2NewWindowRequestedEventHandler, ICoreWebView2 *, ICoreWebView2NewWindowRequestedEventArgs *>(
+                Microsoft::WRL::ComPtr<ICoreWebView2NewWindowRequestedEventHandler> reqh(new Handler<ICoreWebView2NewWindowRequestedEventHandler, ICoreWebView2 *, ICoreWebView2NewWindowRequestedEventArgs *>(
                   [hWnd](ICoreWebView2 *webview, ICoreWebView2NewWindowRequestedEventArgs *args) -> HRESULT
                   {
                     (void)webview;
@@ -1454,25 +1426,25 @@ int CALLBACK WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
                     return S_OK;
                   }));
               EventRegistrationToken nwrToken;
-              if (report(webview->add_NewWindowRequested(reqh.get(), &nwrToken), L"ICoreWebView2::add_NewWindowRequested failed"))
+              if (report(webview->add_NewWindowRequested(reqh.Get(), &nwrToken), L"ICoreWebView2::add_NewWindowRequested failed"))
               {
                 return E_FAIL;
               }
 
-              if (report(api.install(webview.get()), L"internal API install failed"))
+              if (report(api.install(webview), L"internal API install failed"))
               {
                 return E_FAIL;
               }
 
               return S_OK;
             }));
-        if (report(env->CreateCoreWebView2Controller(hWnd, conth.get()), L"ICoreWebView2Environment::CreateCoreWebView2Controller failed"))
+        if (report(env->CreateCoreWebView2Controller(hWnd, conth.Get()), L"ICoreWebView2Environment::CreateCoreWebView2Controller failed"))
         {
           return E_FAIL;
         }
         return S_OK;
       }));
-  if (report(CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr, envh.get()), L"CreateCoreWebView2EnvironmentWithOptions failed"))
+  if (report(CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr, envh.Get()), L"CreateCoreWebView2EnvironmentWithOptions failed"))
   {
     return E_FAIL;
   }
