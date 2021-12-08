@@ -23,7 +23,7 @@ jobs:
       - uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
-          install: git unzip mingw-w64-${{ matrix.arch }}-tools mingw-w64-${{ matrix.arch }}-ninja mingw-w64-${{ matrix.arch }}-cmake
+          install: git unzip mingw-w64-${{ matrix.arch }}-gcc mingw-w64-${{ matrix.arch }}-tools mingw-w64-${{ matrix.arch }}-ninja mingw-w64-${{ matrix.arch }}-cmake
       - name: Run ninja
         shell: msys2 {0}
         run: |
