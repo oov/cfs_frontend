@@ -1,0 +1,2 @@
+#pragma once
+LPCTSTR version = _T("@_git_tag@ ( @_git_revision@ )");

@@ -7,8 +7,7 @@ CoeFont STUDIO 用の非公式な Windows 用 GUI フロントエンドです。
 
 それ以外の変更点はありません。
 
-動作には WebView2 が必要です。  
-ソースコードは Visual Studio 2019 でコンパイルできます。
+動作には WebView2 が必要です。
 
 ## 注意事項
 
